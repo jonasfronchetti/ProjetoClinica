@@ -1,0 +1,178 @@
+CREATE TABLE Empresa (
+  idempresa SERIAL NOT NULL ,
+  razao VARCHAR(80) NOT NULL,
+  fantasia VARCHAR(120),
+  CONSTRAINT PK_empresa PRIMARY KEY(idempresa)
+);
+
+CREATE TABLE cidade (
+  idcidade SERIAL NOT NULL,
+  cidade VARCHAR(80) NOT NULL,
+  uf CHAR(2),
+  cep VARCHAR(9),
+  rais VARCHAR(8),
+  CONSTRAINT PK_cidade PRIMARY KEY(idcidade)
+);
+
+CREATE TABLE filial (
+  idfilial SERIAL NOT NULL,
+  idempresa INTEGER NOT NULL,
+  nome VARCHAR(80),
+  idcidade INTEGER NOT NULL,
+  ifederal VARCHAR(18) NOT NULL,
+  iestadual VARCHAR(18) NOT NULL,
+  endereco VARCHAR(60),
+  bairro VARCHAR(60),
+  numero INTEGER,
+  telefone VARCHAR(20),
+  ativo BOOLEAN DEFAULT True,
+  CONSTRAINT PK_filial PRIMARY KEY(idfilial, idempresa),
+  CONSTRAINT FK_filial_idempresa FOREIGN KEY(idempresa) REFERENCES empresa,
+  CONSTRAINT FK_filial_idcidade FOREIGN KEY(idcidade) REFERENCES cidade
+);
+
+CREATE TABLE pessoa (
+  idpessoa SERIAL NOT NULL,
+  nome VARCHAR(60) NOT NULL,
+  idcidade INTEGER,
+  ifederal VARCHAR(18),
+  endereco VARCHAR(120),
+  bairro VARCHAR(40),
+  numero VARCHAR(20),
+  cidade VARCHAR(60),
+  telefone VARCHAR(20),
+  ativo BOOLEAN DEFAULT True,
+  CONSTRAINT PK_pessoa PRIMARY KEY(idpessoa),
+  CONSTRAINT FK_pessoa_idcidade FOREIGN KEY(idcidade)  REFERENCES cidade
+);
+
+CREATE TABLE areaatuacao (
+  idareaatuacao SERIAL NOT NULL,
+  descricao VARCHAR(80),
+  CONSTRAINT PK_areaatuacao PRIMARY KEY(idareaatuacao)
+);
+
+CREATE TABLE funcionario (
+  idfuncionario sERIAL NOT NULL,
+  idareaatuacao INTEGER NOT NULL,
+  nome VARCHAR(80),
+  cargo VARCHAR(80),
+  salario DECIMAL(9,2),
+  ativo BOOLEAN DEFAULT True,
+  CONSTRAINT PK_funcionario PRIMARY KEY(idfuncionario),
+  CONSTRAINT FK_funcionario_areaatuacao FOREIGN KEY(idareaatuacao) REFERENCES areaatuacao,
+);
+
+CREATE TABLE usuario (
+  idusuario SERIAL NOT NULL,
+  idfuncionario INTEGER,
+  nome VARCHAR(60),
+  usuario VARCHAR(20),
+  senha VARCHAR(20),
+  ativo BOOLEAN DEFAULT True,
+  tipoconta SMALLINT,
+  CONSTRAINT PK_usuario PRIMARY KEY(idusuario)
+);
+
+CREATE TABLE agenda (
+  dataage DATE NOT NULL,
+  horaage TIME NOT NULL,
+  idfuncionario INTEGER NOT NULL,
+  livre BOOLEAN DEFAULT True,
+  observacao VARCHAR(120),
+  consulta INTEGER,
+  cancelada CHAR(1),
+  CONSTRAINT PK_agenda PRIMARY KEY(dataage, horaage, idfuncionario),
+  CONSTRAINT FK_agenda_funcionario FOREIGN KEY(idfuncionario) REFERENCES funcionario
+);
+
+CREATE TABLE consulta (
+  idconsulta SERIAL NOT NULL,
+  idempresa INTEGER NOT NULL,
+  idfilial INTEGER NOT NULL,
+  idfuncionario INTEGER NOT NULL,
+  idppessoa INTEGER NOT NULL,
+  horaage TIME NOT NULL,
+  dataage DATE NOT NULL,
+  motivo VARCHAR(120),
+  observacao VARCHAR(120),
+  valor DECIMAL(9,2),
+  status VARCHAR(10) DEFAULT 'Marcado',
+  cancelado BOOLEAN DEFAULT False,
+  CONSTRAINT PK_consulta PRIMARY KEY(idconsulta, idempresa, idfilial),
+  CONSTRAINT FK_consulta_filial FOREIGN KEY(idfilial, idempresa) REFERENCES filial,
+  CONSTRAINT FK_consulta_agenda FOREIGN KEY(dataage, horaage, idfuncionario) REFERENCES agenda
+);
+
+CREATE TABLE dadosconsulta (
+  iddados serial NOT NULL,
+  idfilial INTEGER NOT NULL,
+  idempresa INTEGER NOT NULL,
+  idconsulta INTEGER NOT NULL,
+  medicamentos VARCHAR(120),
+  exames VARCHAR(120),
+  observacao VARCHAR(120) NULL,
+  CONSTRAINT PK_dadosconsulta PRIMARY KEY(iddados),
+  CONSTRAINT FK_dadosconsulta_consulta FOREIGN KEY(idconsulta, idempresa, idfilial) REFERENCES consulta
+);
+
+CREATE OR REPLACE FUNCTION atualizaAgenda()
+RETURNS TRIGGER
+AS $$
+BEGIN
+if TG_OP='INSERT' then
+		update agenda set consulta=NEW.idconsulta, livre=false where dataage=NEW.dataage and horaage=NEW.horaage and idfuncionario=NEW.idfuncionario;
+end if;
+if TG_OP='UPDATE' then
+	update agenda set consulta=0, livre=true where dataage=OLD.dataage and horaage=OLD.horaage and idfuncionario=OLD.idfuncionario;
+
+	update agenda set consulta=NEW.idconsulta, livre=false where dataage=NEW.dataage and horaage=NEW.horaage and idfuncionario=NEW.idfuncionario;
+end if;
+if TG_OP='DELETE' then
+	update agenda set consulta=0, livre=true where dataage=OLD.dataage and horaage=OLD.horaage and idfuncionario=OLD.idfuncionario;
+end if;
+
+RETURN NULL;
+end;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER Tatualizaagenda
+AFTER INSERT OR UPDATE ON consulta
+FOR EACH ROW
+EXECUTE PROCEDURE atualizaAgenda();
+
+CREATE TRIGGER Tatualizaagendadelete
+AFTER DELETE ON consulta
+FOR EACH ROW
+EXECUTE PROCEDURE atualizaAgenda()
+
+
+CREATE OR REPLACE FUNCTION atualizaDados()
+  RETURNS trigger AS
+$BODY$
+BEGIN
+if TG_OP='INSERT' then
+	insert into dadosconsulta values(default, NEW.idfilial,NEW.idempresa,NEW.idconsulta,'','','');
+end if;
+if TG_OP='DELETE' then
+	delete from dadosconsulta where idconsulta=OLD.idconsulta;
+end if;
+
+RETURN NULL;
+end;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;
+ALTER FUNCTION atualizaagenda() OWNER TO postgres;
+
+CREATE TRIGGER tatualizadados
+  AFTER INSERT
+  ON consulta
+  FOR EACH ROW
+  EXECUTE PROCEDURE atualizaDados();
+
+ CREATE TRIGGER tatualizadadosdelete
+  AFTER DELETE
+  ON consulta
+  FOR EACH ROW
+  EXECUTE PROCEDURE atualizaDados();
